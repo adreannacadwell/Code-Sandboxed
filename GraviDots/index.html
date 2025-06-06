@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Life Simulator – Tailwind Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind config for smooth transitions -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          transitionDuration: { '400': '400ms' },
+          transitionTimingFunction: { 'bounce': 'cubic-bezier(.34,1.56,.64,1)' }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Give the canvas a crisp pixel-look when scaled */
+    canvas { image-rendering: pixelated; }
+  </style>
+</head>
+
+<body class="h-full bg-gray-800 text-gray-200 select-none">
+
+  <div class="flex h-full">
+
+    <!--------- Sidebar / Settings --------->
+    <aside
+      class="w-72 bg-gray-700/90 backdrop-blur p-6 flex flex-col gap-6 shadow-lg border-r border-gray-600 hidden md:flex">
+      <h2 class="text-xl font-bold text-white tracking-wide">⚙️ Settings</h2>
+
+      <!-- Central Force -->
+      <label class="flex flex-col gap-2 group">
+        <span class="uppercase text-xs tracking-wider text-gray-400 group-hover:text-gray-300 transition">
+          Central Force
+        </span>
+        <input id="forceSlider" type="range" min="0" max="1" step="0.01"
+          class="w-full h-2 bg-gray-600 rounded-lg accent-indigo-400"
+          value="0.15">
+        <span id="forceValue" class="text-sm text-right opacity-70">0.15</span>
+      </label>
+
+      <!-- Dot count -->
+      <label class="flex flex-col gap-2 group">
+        <span class="uppercase text-xs tracking-wider text-gray-400 group-hover:text-gray-300 transition">
+          Number of Dots
+        </span>
+        <input id="countSlider" type="range" min="10" max="250" step="1"
+          class="w-full h-2 bg-gray-600 rounded-lg accent-indigo-400"
+          value="120">
+        <span id="countValue" class="text-sm text-right opacity-70">120</span>
+      </label>
+
+      <!-- Interaction toggle -->
+      <label class="flex flex-col gap-2 group">
+        <span class="uppercase text-xs tracking-wider text-gray-400 group-hover:text-gray-300 transition">
+          Dot-to-Dot Gravity
+        </span>
+        <input id="gravitySlider" type="range" min="0" max="1" step="0.01"
+          class="w-full h-2 bg-gray-600 rounded-lg accent-indigo-400"
+          value="0.30">
+        <span id="gravityValue" class="text-sm text-right opacity-70">0.30</span>
+      </label>
+
+      <!-- Color theme pick -->
+      <label class="flex flex-col gap-2 group">
+        <span class="uppercase text-xs tracking-wider text-gray-400 group-hover:text-gray-300 transition">
+          Color Palette
+        </span>
+        <select id="paletteSelect"
+          class="bg-gray-600 border border-gray-500 rounded p-2 focus:outline-none focus:ring-2 focus:ring-indigo-400/60 text-sm">
+          <option value="vivid">Vivid (default)</option>
+          <option value="pastel">Pastel</option>
+          <option value="neon">Neon</option>
+          <option value="monochrome">Monochrome</option>
+        </select>
+      </label>
+
+      <!-- Buttons -->
+      <div class="mt-auto flex gap-3">
+        <button id="resetBtn"
+          class="flex-1 py-2 bg-rose-600 hover:bg-rose-500 transition rounded text-sm font-semibold tracking-wide">
+          Reset
+        </button>
+        <button id="spawnBtn"
+          class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 transition rounded text-sm font-semibold tracking-wide">
+          + Spawn
+        </button>
+      </div>
+    </aside>
+
+    <!--------- Main / Canvas --------->
+    <main class="flex-1 relative">
+      <!-- Canvas fills full space -->
+      <canvas id="simCanvas" class="w-full h-full"></canvas>
+
+      <!-- Tiny credit footer -->
+      <footer
+        class="absolute bottom-3 right-4 text-xs text-gray-500/70 hover:text-gray-300 transition">
+        Made with <span class="animate-pulse"> 💙 </span> | © Cadwell 2025
+      </footer>
+    </main>
+  </div>
+
+  <!--------- Simulation Script --------->
+  <script>
+  // --------- Helpers ---------
+  const rand = (min, max) => Math.random() * (max - min) + min
+  const lerp = (a, b, t) => a + (b - a) * t
+
+  // Pick a color based on current palette
+  const palettes = {
+    vivid:   ['#f87171','#fb923c','#facc15','#4ade80','#34d399','#60a5fa','#a78bfa','#f472b6'],
+    pastel:  ['#fbcfe8','#fde68a','#d9f99d','#a5f3fc','#c4b5fd','#fecaca','#fdba74','#fcd34d'],
+    neon:    ['#ff595e','#ffca3a','#8ac926','#1982c4','#6a4c93','#ff8fab','#00f5d4','#f15bb5'],
+    monochrome: ['#a1a1aa','#71717a','#52525b','#3f3f46','#27272a']
+  }
+  let currentPalette = palettes.vivid
+
+  // --------- Canvas setup ---------
+  const canvas = document.getElementById('simCanvas')
+  const ctx = canvas.getContext('2d')
+  function resize() {
+    canvas.width  = canvas.clientWidth
+    canvas.height = canvas.clientHeight
+  }
+  window.addEventListener('resize', resize)
+  resize()
+
+  // --------- Dot class ---------
+  class Dot {
+    constructor(x,y,vx,vy,size,color){
+      this.x = x; this.y = y
+      this.vx = vx; this.vy = vy
+      this.size = size
+      this.color = color
+    }
+    draw(){
+      ctx.beginPath()
+      ctx.arc(this.x, this.y, this.size, 0, Math.PI*2)
+      ctx.fillStyle = this.color
+      ctx.fill()
+    }
+    update(dt, centralStrength, gravityStrength, dots){
+      // central pull
+      const cx = canvas.width/2, cy = canvas.height/2
+      const dx = cx - this.x, dy = cy - this.y
+      this.vx += dx * centralStrength * dt
+      this.vy += dy * centralStrength * dt
+
+      // dot-dot gravity (very simple, O(n²))
+      if(gravityStrength > 0){
+        dots.forEach(d=>{
+          if(d === this) return
+          let rx = d.x - this.x, ry = d.y - this.y
+          let dist2 = rx*rx+ry*ry + 0.01
+          let force = (gravityStrength*1000) / dist2
+          this.vx += rx * force * dt
+          this.vy += ry * force * dt
+        })
+      }
+
+      // integrate
+      this.x += this.vx * dt
+      this.y += this.vy * dt
+
+      // bounce off walls
+      if(this.x < this.size && this.vx < 0) this.vx *= -0.9
+      if(this.x > canvas.width-this.size && this.vx > 0) this.vx *= -0.9
+      if(this.y < this.size && this.vy < 0) this.vy *= -0.9
+      if(this.y > canvas.height-this.size && this.vy > 0) this.vy *= -0.9
+    }
+  }
+
+  // --------- Simulation state ---------
+  let dots = []
+  let centralStrength = 0.15
+  let gravityStrength = 0.30
+
+  function spawnDots(n){
+    for(let i=0;i<n;i++){
+      dots.push(new Dot(
+        rand(0, canvas.width),
+        rand(0, canvas.height),
+        rand(-50,50), rand(-50,50),
+        rand(3,6),
+        currentPalette[Math.floor(rand(0,currentPalette.length))]
+      ))
+    }
+  }
+
+  // initial dots
+  spawnDots(120)
+
+  // --------- UI wiring ---------
+  const forceSlider = document.getElementById('forceSlider')
+  const forceValue  = document.getElementById('forceValue')
+  forceSlider.addEventListener('input', e=>{
+    centralStrength = parseFloat(e.target.value)
+    forceValue.textContent = centralStrength
+  })
+  const countSlider = document.getElementById('countSlider')
+  const countValue  = document.getElementById('countValue')
+  countSlider.addEventListener('input', e=>{
+    countValue.textContent = e.target.value
+    reset()     // keep total count consistent
+    spawnDots(parseInt(e.target.value))
+  })
+  const gravitySlider = document.getElementById('gravitySlider')
+  const gravityValue  = document.getElementById('gravityValue')
+  gravitySlider.addEventListener('input', e=>{
+    gravityStrength = parseFloat(e.target.value)
+    gravityValue.textContent = gravityStrength
+  })
+
+  document.getElementById('paletteSelect').addEventListener('change', e=>{
+    currentPalette = palettes[e.target.value]
+    // recolor existing ones
+    dots.forEach(d=>{
+      d.color = currentPalette[Math.floor(rand(0,currentPalette.length))]
+    })
+  })
+  document.getElementById('resetBtn').addEventListener('click', reset)
+  document.getElementById('spawnBtn').addEventListener('click', ()=>spawnDots(20))
+
+  function reset(){
+    dots = []
+  }
+
+  // --------- Main loop ---------
+  let last = performance.now()
+  function animate(now){
+    const dt = (now-last)/1000
+    last = now
+
+    ctx.fillStyle = 'rgba(31, 41, 55, 0.4)'   // #1f2937 w/ alpha (gray-800)
+    ctx.fillRect(0,0,canvas.width,canvas.height)
+
+    dots.forEach(dot => {
+      dot.update(dt, centralStrength, gravityStrength, dots)
+      dot.draw()
+    })
+
+    requestAnimationFrame(animate)
+  }
+  requestAnimationFrame(animate)
+  </script>
+
+</body>
+</html>

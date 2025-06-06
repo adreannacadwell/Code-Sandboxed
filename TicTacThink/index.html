@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Tic Tac Toe – AI Edition</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { grayboard: '#1f2937' },          /* gray-800 */
+          transitionDuration: { '400': '400ms' }
+        }
+      }
+    }
+  </script>
+  <style>
+    .cell {
+      background-color:#374151;              /* gray-700           */
+      border:2px solid #4b5563;              /* gray-600           */
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;user-select:none;
+      transition:background-color 0.8s ease-out;
+      font-size:0;                           /* hide fallback text */
+      height: 144px;
+    }
+    .cell:hover{background-color:#4b5563}
+    .cell.winner{background-color:#667eea}   /* indigo-500        */
+    .cell img{width:64px;height:64px;pointer-events:none}
+  </style>
+</head>
+
+<body class="h-full bg-gray-800 text-gray-200 font-sans select-none">
+
+  <div class="flex h-full">
+
+    <!---------- Side Menu ---------->
+    <aside class="w-72 bg-gray-700 p-6 border-r border-gray-600 flex flex-col gap-8">
+      <div>
+        <h2 class="text-xl font-bold mb-2">🎮 Game Settings</h2>
+        <p class="text-sm text-gray-400">One player is randomly assigned as AI each round.</p>
+      </div>
+
+      <!-- AI Depth Slider -->
+      <label class="flex flex-col gap-2">
+        <span class="uppercase text-xs tracking-wider text-gray-400">AI Depth</span>
+        <input id="depthSlider" type="range" min="1" max="15" step="1"
+               value="6"
+               class="accent-indigo-400 bg-gray-600 h-2 rounded-lg">
+        <span id="depthValue" class="text-sm text-right opacity-70">6</span>
+      </label>
+
+      <!-- Restart Button -->
+      <button id="restartBtn"
+        class="bg-rose-600 hover:bg-rose-500 transition px-4 py-2 rounded font-semibold">
+        🔄 Restart Game
+      </button>
+
+      <!-- Status -->
+      <div class="mt-auto text-sm text-gray-400">
+        Current Turn: <span id="turnDisplay" class="text-white font-bold">?</span><br>
+        Human: <span id="humanIcon">?</span> &nbsp;|&nbsp;
+        AI: <span id="aiIcon">?</span>
+      </div>
+    </aside>
+
+    <!---------- Game Board ---------->
+    <main class="flex-1 flex items-center justify-center p-8">
+      <div class="grid grid-cols-3 gap-2 aspect-square w-full max-w-md">
+        <!-- 9 cells -->
+        <div class="cell" data-index="0"></div><div class="cell" data-index="1"></div><div class="cell" data-index="2"></div>
+        <div class="cell" data-index="3"></div><div class="cell" data-index="4"></div><div class="cell" data-index="5"></div>
+        <div class="cell" data-index="6"></div><div class="cell" data-index="7"></div><div class="cell" data-index="8"></div>
+      </div>
+    </main>
+
+    <!-- Tiny credit footer -->
+    <footer
+      class="absolute bottom-3 right-4 text-xs text-gray-500/70 hover:text-gray-300 transition">
+      Made with <span class="animate-pulse"> 💙 </span> | © Cadwell 2025
+    </footer>
+  </div>
+
+  <!---------- Game Logic ---------->
+  <script>
+  /************  Globals & DOM  ************/
+  const cells       = document.querySelectorAll('.cell')
+  const restartBtn  = document.getElementById('restartBtn')
+  const turnDisplay = document.getElementById('turnDisplay')
+  const depthSlider = document.getElementById('depthSlider')
+  const depthValue  = document.getElementById('depthValue')
+  const humanIconEl = document.getElementById('humanIcon')
+  const aiIconEl    = document.getElementById('aiIcon')
+
+  const SVGs = { X:'x.svg', Y:'y.svg' }    // map marks → image paths
+  const WIN_PATTERNS = [
+    [0,1,2],[3,4,5],[6,7,8],
+    [0,3,6],[1,4,7],[2,5,8],
+    [0,4,8],[2,4,6]
+  ]
+
+  let board, currentPlayer, gameOver
+  let aiMark, humanMark
+  let aiDepth = parseInt(depthSlider.value,10)
+
+  /************  Utility  ************/
+  const emptyIndices = brd => brd.map((v,i)=>v?null:i).filter(i=>i!==null)
+
+  function showMark(cellEl, mark){
+    const img = document.createElement('img')
+    img.src = SVGs[mark]
+    img.alt = mark
+    cellEl.appendChild(img)
+  }
+
+  function evaluate(brd){
+    for(const [a,b,c] of WIN_PATTERNS){
+      if(brd[a] && brd[a]===brd[b] && brd[b]===brd[c]){
+        return brd[a]===aiMark ? +10 : -10
+      }
+    }
+    return 0
+  }
+
+  /************  Minimax w/ Alpha–Beta  ************/
+  function minimax(brd, depth, alpha, beta, isMax){
+    const score = evaluate(brd)
+    if(score!==0 || depth===0 || !emptyIndices(brd).length) return score
+
+    if(isMax){
+      let best=-Infinity
+      for(const idx of emptyIndices(brd)){
+        brd[idx]=aiMark
+        best=Math.max(best,minimax(brd,depth-1,alpha,beta,false))
+        brd[idx]=null
+        alpha=Math.max(alpha,best)
+        if(beta<=alpha) break
+      }
+      return best
+    }else{
+      let best=+Infinity
+      for(const idx of emptyIndices(brd)){
+        brd[idx]=humanMark
+        best=Math.min(best,minimax(brd,depth-1,alpha,beta,true))
+        brd[idx]=null
+        beta=Math.min(beta,best)
+        if(beta<=alpha) break
+      }
+      return best
+    }
+  }
+
+  function bestMove(){
+    let bestScore=-Infinity, move=null
+    for(const idx of emptyIndices(board)){
+      board[idx]=aiMark
+      const score=minimax(board,aiDepth-1,-Infinity,+Infinity,false)
+      board[idx]=null
+      if(score>bestScore){bestScore=score;move=idx}
+    }
+    return move
+  }
+
+  /************  Game Lifecycle  ************/
+  function makeMove(index,mark,animate=true){
+    board[index]=mark
+    const cell=cells[index]
+    showMark(cell,mark)
+    if(animate) cell.classList.add('scale-0'), setTimeout(()=>cell.classList.remove('scale-0'),0)
+    checkEnd()
+    currentPlayer = currentPlayer=== 'X' ? 'Y' : 'X'
+    updateStatus()
+  }
+
+  function aiTurn(){
+    if(gameOver) return
+    const move = bestMove()
+    if(move!==null){
+      setTimeout(()=>makeMove(move,aiMark,false),300)
+    }
+  }
+
+  function playerClick(e){
+    const idx = e.currentTarget.dataset.index
+    if(board[idx] || gameOver || currentPlayer!==humanMark) return
+    makeMove(idx,humanMark)
+    if(!gameOver) aiTurn()
+  }
+
+  function checkEnd(){
+    for(const pattern of WIN_PATTERNS){
+      const [a,b,c]=pattern
+      if(board[a] && board[a]===board[b] && board[b]===board[c]){
+        pattern.forEach(i=>cells[i].classList.add('winner'))
+        turnDisplay.textContent = board[a]==humanMark ? 'Human Wins!' : 'AI Wins!'
+        gameOver=true
+        return
+      }
+    }
+    if(!board.includes(null) && !gameOver){
+      turnDisplay.textContent='Draw'
+      gameOver=true
+    }
+  }
+
+  function updateStatus(){
+    if(gameOver) return
+    turnDisplay.textContent = currentPlayer===humanMark ? 'Human' : 'AI'
+  }
+
+  function resetGame(){
+    // core state
+    board = Array(9).fill(null)
+    cells.forEach(c=>{
+      c.innerHTML=''
+      c.classList.remove('winner')
+    })
+    gameOver=false
+
+    // randomize who is AI
+    if(Math.random()<0.5){ aiMark='X'; humanMark='Y' } else { aiMark='Y'; humanMark='X' }
+
+    // UI markers
+    humanIconEl.innerHTML = `<img src="${SVGs[humanMark]}" class="inline w-5 h-5">`
+    aiIconEl.innerHTML    = `<img src="${SVGs[aiMark]}"    class="inline w-5 h-5">`
+
+    // X always starts in classic rules
+    currentPlayer='X'
+    updateStatus()
+
+    // if AI is X, let it open
+    if(currentPlayer===aiMark) aiTurn()
+  }
+
+  /************  Wiring Up  ************/
+  depthSlider.addEventListener('input',e=>{
+    aiDepth=parseInt(e.target.value,10)
+    depthValue.textContent=aiDepth
+  })
+
+  restartBtn.addEventListener('click',resetGame)
+  cells.forEach(c=>c.addEventListener('click',playerClick))
+
+  // first launch
+  resetGame()
+  </script>
+</body>
+</html>
